@@ -6,7 +6,28 @@ import openai
 from sentify.segmenter import Segmenter
 from vecstore.vecstore import VecStore, normarr
 
-client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+API_KEY = [os.getenv("OPENAI_API_KEY")]
+
+
+def set_openai_api_key(key):
+    assert key
+    assert len(key) > 40
+    API_KEY[0] = key
+    return key
+
+
+def ensure_openai_api_key():
+    return API_KEY[0]
+
+
+def clear_key():
+    API_KEY[0] = ""
+
+
+def get_client():
+    return openai.OpenAI(api_key=API_KEY[0])
+
+
 segmenter = Segmenter()
 
 trace = 0
@@ -21,6 +42,7 @@ def tprint(*args, **kwargs):
 
 def ask(prompt: str):
     """Return the response from the OpenAI API for a given prompt."""
+    client = get_client()
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
@@ -50,6 +72,7 @@ def get_embeddings(
     """
     Return the embedding vector for list of sentences using the OpenAI Embedding API.
     """
+    client = get_client()
     response = client.embeddings.create(model=model, input=sents)
     # The API returns a list of data with embeddings.
     embs = [item.embedding for item in response.data]
