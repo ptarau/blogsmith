@@ -6,22 +6,26 @@ import openai
 from sentify.segmenter import Segmenter
 from vecstore.vecstore import VecStore, normarr
 
+trace = 0
+caching = 1
+
 API_KEY = [os.getenv("OPENAI_API_KEY")]
 
 
 def set_openai_api_key(key):
-    assert key
-    assert len(key) > 40
-    API_KEY[0] = key
+    if API_KEY[0]:
+        return API_KEY[0]
+
+    if key and len(key) > 40:
+        API_KEY[0] = key
+    else:
+        key = ""
     return key
-
-
-def ensure_openai_api_key():
-    return API_KEY[0]
 
 
 def clear_key():
     API_KEY[0] = ""
+    os.environ["OPENAI_API_KEY"] = ""
 
 
 def get_client():
@@ -29,9 +33,6 @@ def get_client():
 
 
 segmenter = Segmenter()
-
-trace = 0
-caching = 1
 
 
 def tprint(*args, **kwargs):
