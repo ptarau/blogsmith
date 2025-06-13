@@ -152,6 +152,7 @@ class Cache:
     """A cache of embeddings and sentences for a given topic."""
 
     def __init__(self, name: str, topic: str):
+        os.makedirs("cache/", exist_ok=True)
         tname = topic.replace(" ", "_").lower()
         tname = "cache/" + name.lower() + "_" + tname
         self.vecstore = VecStore(tname + ".bin", dim=1536)
@@ -187,6 +188,7 @@ class Agent:
         self.keep = keep  # Fraction of sentences to keep.
         self.topic = topic  # Topic of the blog.
         self.cache = Cache(name, topic)
+        os.makedirs("out/", exist_ok=True)
         if not caching:
             self.cache.clear()
 
