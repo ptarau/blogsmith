@@ -6,10 +6,47 @@ import openai
 from sentify.segmenter import Segmenter
 from vecstore.vecstore import VecStore, normarr
 
-trace = 0
-caching = 1
+trace = 1
+caching = 0
 
 API_KEY = [os.getenv("OPENAI_API_KEY")]
+GPT_MODEL = ["gpt-4o", "text-embedding-3-small", 1536, "gpt"]
+
+USE_OLLAMA = [True]
+OLLAMA_MODEL = ["mistral-nemo:12b", "mxbai-embed-large", 1024, "ollama"]
+
+
+def get_model():
+    if USE_OLLAMA[0]:
+        return OLLAMA_MODEL[0]
+    else:
+        return GPT_MODEL[0]
+
+
+def get_embedding_model():
+    if USE_OLLAMA[0]:
+        return OLLAMA_MODEL[1]
+    else:
+        return GPT_MODEL[1]
+
+
+def get_emb_dim():
+    if USE_OLLAMA[0]:
+        return OLLAMA_MODEL[2]
+    else:
+        return GPT_MODEL[2]
+
+
+def get_client():
+    if USE_OLLAMA[0]:
+        # Ollama API is OpenAI-compatible (does not check API key)
+        return openai.OpenAI(
+            base_url="http://localhost:11434/v1",
+            api_key="ollama",  # Ollama ignores the key, but requires it
+        )
+    else:
+        api_key = API_KEY[0]
+        return openai.OpenAI(api_key=api_key)
 
 
 def set_openai_api_key(key):
@@ -28,10 +65,6 @@ def clear_key():
     os.environ["OPENAI_API_KEY"] = ""
 
 
-def get_client():
-    return openai.OpenAI(api_key=API_KEY[0])
-
-
 segmenter = Segmenter()
 
 
@@ -45,9 +78,12 @@ def ask(prompt: str):
     """Return the response from the OpenAI API for a given prompt."""
     client = get_client()
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model=get_model(),
         messages=[{"role": "user", "content": prompt}],
     )
+
+    if USE_OLLAMA[0]:
+        return response.choices[0].message.content, 0
 
     usage = response.usage
     input_tokens = usage.prompt_tokens
@@ -67,12 +103,11 @@ def ask_and_segment(prompt: str) -> list[str]:
     return segmenter.text2sents(response), cost
 
 
-def get_embeddings(
-    sents: list[str], model: str = "text-embedding-3-small"
-) -> list[float]:
+def get_embeddings(sents: list[str]) -> list[float]:
     """
     Return the embedding vector for list of sentences using the OpenAI Embedding API.
     """
+    model = get_embedding_model()
     client = get_client()
     response = client.embeddings.create(model=model, input=sents)
     # The API returns a list of data with embeddings.
@@ -154,9 +189,10 @@ class Cache:
 
     def __init__(self, name: str, topic: str):
         os.makedirs("cache/", exist_ok=True)
+        dim = get_emb_dim()
         tname = topic.replace(" ", "_").lower()
-        tname = "cache/" + name.lower() + "_" + tname
-        self.vecstore = VecStore(tname + ".bin", dim=1536)
+        tname = "cache/" + name.lower() + "_" + tname + str(dim)
+        self.vecstore = VecStore(tname + ".bin", dim=dim)
         self.sentstore = tname + ".txt"
 
     def save(self, sents: list[str]):
@@ -201,7 +237,9 @@ class Agent:
     def rank_sents(self, sents: list[str]) -> str:
         """Rank and trim the sentences."""
 
-        knns = self.cache.vecstore.all_knns(k=3, as_weights=False)
+        kn = max(1, min(len(sents) - 0, 3))
+
+        knns = self.cache.vecstore.all_knns(k=kn, as_weights=False)
 
         assert (len(knns)) == len(sents), (len(knns), "!=", len(sents))
 
@@ -242,9 +280,9 @@ class Agent:
         tprint("\nNORM:", np.linalg.norm(embs))
 
         embs = normarr(embs)
-        for x in sents:
-            tprint(x)
-        tprint("\nSHAPE:", embs.shape)
+        for i, x in enumerate(sents):
+            tprint("\n", i, " ----> ", x)
+        tprint("\nSHAPE:", embs.shape, "SENTS:", len(sents))
         self.cache.vecstore.add(embs)
         self.cache.save(sents)  # also saves the embeddings
         return sents, None
@@ -429,15 +467,26 @@ class Webifier(Agent):
             ls = len(suf)
             text = text[lp : len(text) - ls]
 
-        text = text.replace("####", "\n\n####")
+        text = text.replace("#### ", "\n\n#### ")
+        text = text.replace("**", " ")
         text = text.replace("!", ":\n\n")
         return text
+
+
+def init_cost():
+    """Initialize the cost of the agents."""
+    Agent.cost = 0.0
+
+
+def get_cost():
+    """Get the cost of the agents."""
+    return Agent.cost
 
 
 def run_blogger(topic=None):
     """Run the blogger multi-agent system."""
     print("\n\nSTARTING the blogger on topic: ", topic)
-    Agent.cost = 0.0
+    init_cost()
     assert topic is not None
     intro = BlogStarter("Deep LLM Intro", topic).step()
     details = BlogDetailer("Deep LLM Details", intro, topic).step()
@@ -450,6 +499,7 @@ def run_blogger(topic=None):
     # save_md(text, topic)
 
     print(f"\n\nBLOG:\n{text}")
+    print(f"\n\nCOST:\n{get_cost()}")
 
     return text
 
@@ -502,7 +552,7 @@ def test_blogger():
     run_blogger(topic=intSuper)
     run_blogger(topic=hornSuper)
 
-    print(f"\n\nCOST: ${Agent.cost},")
+    print(f"\n\nCOST: ${get_cost()}")
 
 
 if __name__ == "__main__":

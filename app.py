@@ -6,6 +6,8 @@ from blogsmith.blogger import (
     run_blogger,
     set_openai_api_key,
     clear_key,
+    init_cost,
+    get_cost,
 )
 
 st.sidebar.title(
@@ -50,6 +52,7 @@ def do_query():
         return
     html = run_blogger(initiator)
     st.write(html)
+    st.write("\nLLM COST:", get_cost())
 
 
 if query_it:
