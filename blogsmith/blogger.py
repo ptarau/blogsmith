@@ -100,6 +100,7 @@ def ask(prompt: str):
 def ask_and_segment(prompt: str) -> list[str]:
     """Segment into sentences the OpenAI answer for a given prompt."""
     response, cost = ask(prompt)
+    response = response.replace('"', " ")
     return segmenter.text2sents(response), cost
 
 
@@ -129,7 +130,7 @@ def knn_graph(knns):
 
 def trim(sents: list[str], keep: float = 0.30) -> list[str]:
     """Trim a list of sentences to keep only the top ranke sentences."""
-    n = int(len(sents) * keep)
+    n = min(5, int(len(sents) * keep))
     return sents[:n]
 
 
@@ -467,6 +468,7 @@ class Webifier(Agent):
             ls = len(suf)
             text = text[lp : len(text) - ls]
 
+        text = text.replace("\n### ", "\n")
         text = text.replace("#### ", "\n\n#### ")
         text = text.replace("**", " ")
         text = text.replace("!", ":\n\n")
