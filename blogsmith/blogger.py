@@ -6,8 +6,8 @@ import openai
 from sentify.segmenter import Segmenter
 from vecstore.vecstore import VecStore, normarr
 
-trace = 1
-caching = 0
+trace = 0
+caching = True
 
 API_KEY = [os.getenv("OPENAI_API_KEY")]
 GPT_MODEL = ["gpt-4o", "text-embedding-3-small", 1536, "gpt"]
@@ -74,7 +74,7 @@ def tprint(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def ask(prompt: str):
+def ask(prompt: str) -> tuple[str, float]:
     """Return the response from the OpenAI API for a given prompt."""
     client = get_client()
     response = client.chat.completions.create(
@@ -83,7 +83,7 @@ def ask(prompt: str):
     )
 
     if USE_OLLAMA[0]:
-        return response.choices[0].message.content, 0
+        return response.choices[0].message.content, 0.0
 
     usage = response.usage
     input_tokens = usage.prompt_tokens
@@ -97,14 +97,14 @@ def ask(prompt: str):
     return response.choices[0].message.content, cost
 
 
-def ask_and_segment(prompt: str) -> list[str]:
+def ask_and_segment(prompt: str) -> tuple[list[str], float]:
     """Segment into sentences the OpenAI answer for a given prompt."""
     response, cost = ask(prompt)
     response = response.replace('"', " ")
     return segmenter.text2sents(response), cost
 
 
-def get_embeddings(sents: list[str]) -> list[float]:
+def get_embeddings(sents: list[str]) -> list[list[float]]:
     """
     Return the embedding vector for list of sentences using the OpenAI Embedding API.
     """
@@ -238,6 +238,10 @@ class Agent:
     def rank_sents(self, sents: list[str]) -> str:
         """Rank and trim the sentences."""
 
+        if len(sents) < 5:
+            tprint("\nNot enough sentences to rank:", len(sents))
+            return "\n".join(sents)
+
         kn = max(1, min(len(sents) - 0, 3))
 
         knns = self.cache.vecstore.all_knns(k=kn, as_weights=False)
@@ -255,9 +259,9 @@ class Agent:
 
         last = len(sents) - 1
         text = [(x[0], sents[x[0]]) for x in ranks if x[0] != 0 and x[0] != last]
-        text = sorted(text, key=lambda x: x[0])
-        text = trim(text, self.keep)
-        text = "\n".join([x[1] for x in text])
+        texts = sorted(text, key=lambda x: x[0])
+        texts = trim(texts, self.keep)
+        text = "\n".join([x[1] for x in texts])
 
         text = sents[0] + "\n" + text + "\n" + sents[last]
         print("\nSALIENT:", self.name, "SENTS:", len(sents))
