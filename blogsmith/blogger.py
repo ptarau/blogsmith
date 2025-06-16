@@ -15,7 +15,14 @@ GPT_MODEL = ["gpt-4o", "text-embedding-3-small", 1536, "gpt"]
 USE_OLLAMA = [False]
 OLLAMA_MODEL = ["mistral-nemo:12b", "mxbai-embed-large", 1024, "ollama"]
 
-SKIP_WEBIFY = False  # USE_OLLAMA[0]
+SKIP_WEBIFY = USE_OLLAMA[0]
+
+
+def get_llm_name():
+    if USE_OLLAMA[0]:
+        return OLLAMA_MODEL[3]
+    else:
+        return GPT_MODEL[3]
 
 
 def get_client():
@@ -181,21 +188,26 @@ def load_sents(fname: str) -> list[str]:
         return [line.strip() for line in f.readlines()]
 
 
+def file_name(topic: str) -> str:
+    """Return the name of the file for a given topic."""
+    name = topic.replace(" ", "_").lower()
+    return f"out/blog_{name}_{get_llm_name()}"
+
+
 def save_text(text: str, topic: str):
     """Save the text to a file."""
-    name = topic.replace(" ", "_").lower()
-    fname = f"out/blog_{name}"
+
+    fname = file_name(topic)
     with open(f"{fname}.txt", "w") as f:
         f.write(text)
     if SKIP_WEBIFY:
         with open(f"{fname}.md", "w") as f:
-            f.write(text.replace("** ", "**\n"))
+            f.write(text.replace("**", "\n\n"))
 
 
 def load_text(topic: str) -> str:
     """Load the text from a file."""
-    name = topic.replace(" ", "_").lower()
-    fname = f"out/blog_{name}.txt"
+    fname = file_name(topic) + ".txt"
     if not os.path.exists(fname):
         return ""
     with open(fname, "r") as f:
@@ -203,19 +215,19 @@ def load_text(topic: str) -> str:
 
 
 def save_md(text: str, topic: str):
-    """Save the markdown text to a file."""
-    name = topic.replace(" ", "_").lower()
-    with open(f"out/blog_{name}.md", "w") as f:
+    """Save the markdown text and html to files."""
+    fname = file_name(topic)
+    text = text.replace("** ", "\n\n**\n")
+    with open(fname + ".md", "w") as f:
         f.write(text)
-    with open(f"out/blog_{name}.html", "w") as f:
+    with open(fname + ".html", "w") as f:
         html = markdown.markdown(text)
         f.write(html)
 
 
 def load_md(topic: str) -> str:
     """Load the markdown text from a file."""
-    name = topic.replace(" ", "_").lower()
-    fname = f"out/blog_{name}.md"
+    fname = file_name(topic) + ".md"
     if not os.path.exists(fname):
         return ""
     with open(fname, "r") as f:
@@ -228,8 +240,9 @@ class Cache:
     def __init__(self, name: str, topic: str):
         os.makedirs("cache/", exist_ok=True)
         dim = get_emb_dim()
+        llm = get_llm_name()
         tname = topic.replace(" ", "_").lower()
-        tname = "cache/" + name.lower() + "_" + tname + str(dim)
+        tname = "cache/" + name.lower() + "_" + tname + "_" + llm
         self.vecstore = VecStore(tname + ".bin", dim=dim)
         self.sentstore = tname + ".txt"
 
