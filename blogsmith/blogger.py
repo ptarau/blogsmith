@@ -6,7 +6,7 @@ import openai
 from sentify.segmenter import Segmenter
 from vecstore.vecstore import VecStore, normarr
 
-trace = 1
+trace = 0
 caching = True
 
 API_KEY = [os.getenv("OPENAI_API_KEY")]
@@ -14,6 +14,8 @@ GPT_MODEL = ["gpt-4o", "text-embedding-3-small", 1536, "gpt"]
 
 USE_OLLAMA = [False]
 OLLAMA_MODEL = ["mistral-nemo:12b", "mxbai-embed-large", 1024, "ollama"]
+
+SKIP_WEBIFY = False  # USE_OLLAMA[0]
 
 
 def get_client():
@@ -185,9 +187,9 @@ def save_text(text: str, topic: str):
     fname = f"out/blog_{name}"
     with open(f"{fname}.txt", "w") as f:
         f.write(text)
-    if USE_OLLAMA[0]:
+    if SKIP_WEBIFY:
         with open(f"{fname}.md", "w") as f:
-            f.write(text)
+            f.write(text.replace("** ", "**\n"))
 
 
 def load_text(topic: str) -> str:
@@ -301,7 +303,8 @@ class Agent:
         trimmed_texts = trim(texts, self.keep)
 
         trimmed_text = "\n".join(trimmed_texts)
-        print(
+        """
+        tprint(
             "SUSPECT TEXTS",
             texts,
             "LEN TEXTS:",
@@ -309,6 +312,7 @@ class Agent:
             "LEN TRIMMED:",
             len(trimmed_texts),
         )
+        """
 
         final_text = sents[0] + "\n" + trimmed_text + "\n" + sents[last]
         print("\nSALIENT TRIMMED:", len(trimmed_texts), self.name, "SENTS:", len(sents))
@@ -324,7 +328,7 @@ class Agent:
         Agent.cost += cost
 
         if self.keep >= 1.0:
-            print(f"SALIENT \n{self.name} BLOG SENTS: {len(sents)}")
+            print(f"SALIENT ALL KEPT\n{self.name} BLOG SENTS: {len(sents)}")
             text = "\n".join(sents)
             return sents, self.clean_text(text)
 
@@ -364,7 +368,7 @@ class Agent:
             sents = self.cache.load()
             # ranking will needed also
 
-        elif self.keep == 1.0 and output != "":
+        elif self.keep >= 1.0 and output != "":
             print(f"OUTPUT CACHING for {self.name}")
             return output
 
@@ -548,12 +552,11 @@ def run_blogger(topic=None):
     ).step()
     text = "\n\n".join([intro, details, conclusion])
     text = Refiner("Deep LLM Refined", text, topic).step()
-    if USE_OLLAMA[0]:
+    if SKIP_WEBIFY:
         print(f"\n\nCOST:\n{get_cost()}")
         return text
 
     text = Webifier("Deep LLM in MD form", text, topic).step()
-    # save_md(text, topic)
 
     print(f"\n\nBLOG:\n{text}")
     print(f"\n\nCOST:\n{get_cost()}")
