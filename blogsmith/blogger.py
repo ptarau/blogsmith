@@ -6,14 +6,27 @@ import openai
 from sentify.segmenter import Segmenter
 from vecstore.vecstore import VecStore, normarr
 
-trace = 0
+trace = 1
 caching = True
 
 API_KEY = [os.getenv("OPENAI_API_KEY")]
 GPT_MODEL = ["gpt-4o", "text-embedding-3-small", 1536, "gpt"]
 
-USE_OLLAMA = [True]
+USE_OLLAMA = [False]
 OLLAMA_MODEL = ["mistral-nemo:12b", "mxbai-embed-large", 1024, "ollama"]
+
+
+def get_client():
+    if USE_OLLAMA[0]:
+        # Ollama API is OpenAI-compatible (does not check API key)
+        return openai.OpenAI(
+            base_url="http://u.local:11434/v1",
+            # base_url="http://localhost:11434/v1",
+            api_key="ollama",  # Ollama ignores the key, but requires it
+        )
+    else:
+        api_key = API_KEY[0]
+        return openai.OpenAI(api_key=api_key)
 
 
 def get_model():
@@ -35,18 +48,6 @@ def get_emb_dim():
         return OLLAMA_MODEL[2]
     else:
         return GPT_MODEL[2]
-
-
-def get_client():
-    if USE_OLLAMA[0]:
-        # Ollama API is OpenAI-compatible (does not check API key)
-        return openai.OpenAI(
-            base_url="http://localhost:11434/v1",
-            api_key="ollama",  # Ollama ignores the key, but requires it
-        )
-    else:
-        api_key = API_KEY[0]
-        return openai.OpenAI(api_key=api_key)
 
 
 def set_openai_api_key(key):
@@ -74,25 +75,50 @@ def tprint(*args, **kwargs):
         print(*args, **kwargs)
 
 
+def try_llm(prompt: str):
+    """Try to ask the OpenAI API for a given prompt."""
+    client = get_client()
+    try:
+        response = client.chat.completions.create(
+            model=get_model(),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if response is None:
+            print("*** No response from OpenAI API")
+            exit(1)
+        return response
+    except openai.OpenAIError as e:
+        print("*** OpenAIError:", e)
+        exit(1)
+
+
 def ask(prompt: str) -> tuple[str, float]:
     """Return the response from the OpenAI API for a given prompt."""
+
     client = get_client()
-    response = client.chat.completions.create(
-        model=get_model(),
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        response = client.chat.completions.create(
+            model=get_model(),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if response is None:
+            print("*** No response from OpenAI API")
+            exit(1)
+    except openai.OpenAIError as e:
+        print("*** OpenAIError:", e)
+        exit(1)
 
     if USE_OLLAMA[0]:
-        return response.choices[0].message.content, 0.0
+        cost = 0.0
+    else:
+        usage = response.usage
+        input_tokens = usage.prompt_tokens
+        output_tokens = usage.completion_tokens
 
-    usage = response.usage
-    input_tokens = usage.prompt_tokens
-    output_tokens = usage.completion_tokens
+        input_rate = 0.005 / 1000  # $0.005 per 1K input tokens
+        output_rate = 0.015 / 1000  # $0.015 per 1K output tokens
 
-    input_rate = 0.005 / 1000  # $0.005 per 1K input tokens
-    output_rate = 0.015 / 1000  # $0.015 per 1K output tokens
-
-    cost = (input_tokens * input_rate) + (output_tokens * output_rate)
+        cost = (input_tokens * input_rate) + (output_tokens * output_rate)
 
     return response.choices[0].message.content, cost
 
@@ -110,6 +136,11 @@ def get_embeddings(sents: list[str]) -> list[list[float]]:
     """
     model = get_embedding_model()
     client = get_client()
+    try:
+        response = client.embeddings.create(model=model, input=sents)
+    except openai.OpenAIError as e:
+        print("*** OpenAIError:", e)
+        exit(1)
     response = client.embeddings.create(model=model, input=sents)
     # The API returns a list of data with embeddings.
     embs = [item.embedding for item in response.data]
@@ -128,10 +159,10 @@ def knn_graph(knns):
     return rs
 
 
-def trim(sents: list[str], keep: float = 0.30) -> list[str]:
-    """Trim a list of sentences to keep only the top ranke sentences."""
-    n = min(5, int(len(sents) * keep))
-    return sents[:n]
+def trim(sents: list[str], keep: float = 0.50) -> list[str]:
+    """Trim a list of sentences to keep only the top ranked sentences."""
+    n = max(5, int(len(sents) * keep))
+    return sents[0:n]
 
 
 def save_sents(sents: list[str], fname: str):
@@ -151,8 +182,12 @@ def load_sents(fname: str) -> list[str]:
 def save_text(text: str, topic: str):
     """Save the text to a file."""
     name = topic.replace(" ", "_").lower()
-    with open(f"out/blog_{name}.txt", "w") as f:
+    fname = f"out/blog_{name}"
+    with open(f"{fname}.txt", "w") as f:
         f.write(text)
+    if USE_OLLAMA[0]:
+        with open(f"{fname}.md", "w") as f:
+            f.write(text)
 
 
 def load_text(topic: str) -> str:
@@ -258,15 +293,27 @@ class Agent:
         # take first k highest ranked, order them by occurence order
 
         last = len(sents) - 1
-        text = [(x[0], sents[x[0]]) for x in ranks if x[0] != 0 and x[0] != last]
-        texts = sorted(text, key=lambda x: x[0])
-        texts = trim(texts, self.keep)
-        text = "\n".join([x[1] for x in texts])
+        triples = [
+            (x[0], x[1], sents[x[0]]) for x in ranks if x[0] != 0 and x[0] != last
+        ]
+        triples = sorted(triples, key=lambda x: x[1])
+        texts = [x[2] for x in triples]
+        trimmed_texts = trim(texts, self.keep)
 
-        text = sents[0] + "\n" + text + "\n" + sents[last]
-        print("\nSALIENT:", self.name, "SENTS:", len(sents))
-        tprint(text)
-        return text
+        trimmed_text = "\n".join(trimmed_texts)
+        print(
+            "SUSPECT TEXTS",
+            texts,
+            "LEN TEXTS:",
+            len(texts),
+            "LEN TRIMMED:",
+            len(trimmed_texts),
+        )
+
+        final_text = sents[0] + "\n" + trimmed_text + "\n" + sents[last]
+        print("\nSALIENT TRIMMED:", len(trimmed_texts), self.name, "SENTS:", len(sents))
+        tprint(final_text)
+        return final_text
 
     def step_no_cache(self):
         """Step without caching."""
@@ -318,7 +365,7 @@ class Agent:
             # ranking will needed also
 
         elif self.keep == 1.0 and output != "":
-            print(f"OTPUT CACHING for {self.name}")
+            print(f"OUTPUT CACHING for {self.name}")
             return output
 
         else:
@@ -351,7 +398,7 @@ class BlogStarter(Agent):
         Do not use any markup, enumerations or other formatting. 
         Just clear, plain sentences, please!
         """
-        super().__init__(name, prompt, topic, 0.42)
+        super().__init__(name, prompt, topic, 0.50)
 
 
 class BlogDetailer(Agent):
@@ -416,13 +463,13 @@ class Refiner(Agent):
 
     # override
     def save_output(self, text: str):
-        """Save the output to a ftxt ile."""
+        """Save the output to a txt file."""
         tprint("save_output: ", self.name)
         save_text(text, self.topic)
 
     # override
     def load_output(self) -> str:
-        """Load the output from a ftxt ile."""
+        """Load the output from a txt file."""
         tprint("load_output: ", self.name)
         text = load_text(self.topic)
         return text
@@ -501,6 +548,10 @@ def run_blogger(topic=None):
     ).step()
     text = "\n\n".join([intro, details, conclusion])
     text = Refiner("Deep LLM Refined", text, topic).step()
+    if USE_OLLAMA[0]:
+        print(f"\n\nCOST:\n{get_cost()}")
+        return text
+
     text = Webifier("Deep LLM in MD form", text, topic).step()
     # save_md(text, topic)
 
