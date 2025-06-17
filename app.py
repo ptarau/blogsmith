@@ -15,7 +15,7 @@ st.sidebar.title(
 )
 
 
-def collect_key():
+def collect_key() -> str:
     placeholder = st.empty()
     key = os.getenv("OPENAI_API_KEY")
     key = set_openai_api_key(key)

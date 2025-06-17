@@ -18,14 +18,14 @@ OLLAMA_MODEL = ["mistral-nemo:12b", "mxbai-embed-large", 1024, "ollama"]
 SKIP_WEBIFY = USE_OLLAMA[0]
 
 
-def get_llm_name():
+def get_llm_name() -> str:
     if USE_OLLAMA[0]:
         return OLLAMA_MODEL[3]
     else:
         return GPT_MODEL[3]
 
 
-def get_client():
+def get_client() -> openai.OpenAI:
     if USE_OLLAMA[0]:
         # Ollama API is OpenAI-compatible (does not check API key)
         return openai.OpenAI(
@@ -38,28 +38,28 @@ def get_client():
         return openai.OpenAI(api_key=api_key)
 
 
-def get_model():
+def get_model() -> str:
     if USE_OLLAMA[0]:
         return OLLAMA_MODEL[0]
     else:
         return GPT_MODEL[0]
 
 
-def get_embedding_model():
+def get_embedding_model() -> str:
     if USE_OLLAMA[0]:
         return OLLAMA_MODEL[1]
     else:
         return GPT_MODEL[1]
 
 
-def get_emb_dim():
+def get_emb_dim() -> int:
     if USE_OLLAMA[0]:
         return OLLAMA_MODEL[2]
     else:
         return GPT_MODEL[2]
 
 
-def set_openai_api_key(key):
+def set_openai_api_key(key) -> str:
     if API_KEY[0]:
         return API_KEY[0]
 
@@ -84,23 +84,6 @@ def tprint(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def try_llm(prompt: str):
-    """Try to ask the OpenAI API for a given prompt."""
-    client = get_client()
-    try:
-        response = client.chat.completions.create(
-            model=get_model(),
-            messages=[{"role": "user", "content": prompt}],
-        )
-        if response is None:
-            print("*** No response from OpenAI API")
-            exit(1)
-        return response
-    except openai.OpenAIError as e:
-        print("*** OpenAIError:", e)
-        exit(1)
-
-
 def ask(prompt: str) -> tuple[str, float]:
     """Return the response from the OpenAI API for a given prompt."""
 
@@ -113,11 +96,14 @@ def ask(prompt: str) -> tuple[str, float]:
         if response is None:
             print("*** No response from OpenAI API")
             exit(1)
+
     except openai.OpenAIError as e:
         print("*** OpenAIError:", e)
         exit(1)
 
     if USE_OLLAMA[0]:
+        cost = 0.0
+    elif response.usage is None:
         cost = 0.0
     else:
         usage = response.usage
@@ -129,7 +115,12 @@ def ask(prompt: str) -> tuple[str, float]:
 
         cost = (input_tokens * input_rate) + (output_tokens * output_rate)
 
-    return response.choices[0].message.content, cost
+    answer = response.choices[0].message.content
+    if answer is None:
+        print("*** NO ANSWER from OpenAI!")
+        return "", cost
+    else:
+        return answer, cost
 
 
 def ask_and_segment(prompt: str) -> tuple[list[str], float]:
@@ -316,23 +307,13 @@ class Agent:
         trimmed_texts = trim(texts, self.keep)
 
         trimmed_text = "\n".join(trimmed_texts)
-        """
-        tprint(
-            "SUSPECT TEXTS",
-            texts,
-            "LEN TEXTS:",
-            len(texts),
-            "LEN TRIMMED:",
-            len(trimmed_texts),
-        )
-        """
 
         final_text = sents[0] + "\n" + trimmed_text + "\n" + sents[last]
         print("\nSALIENT TRIMMED:", len(trimmed_texts), self.name, "SENTS:", len(sents))
         tprint(final_text)
         return final_text
 
-    def step_no_cache(self):
+    def step_no_cache(self) -> tuple[list[str], str]:
         """Step without caching."""
         prompt = self.goal
 
@@ -354,7 +335,7 @@ class Agent:
         tprint("\nSHAPE:", embs.shape, "SENTS:", len(sents))
         self.cache.vecstore.add(embs)
         self.cache.save(sents)  # also saves the embeddings
-        return sents, None
+        return sents, ""
 
     # overridable
     def save_output(self, text: str):
@@ -365,12 +346,12 @@ class Agent:
         tprint("no load_output: ", self.name)
         return ""
 
-    def step_with_cache(self):
+    def step_with_cache(self) -> tuple[list[str], str]:
         """Step with caching."""
         sents = self.cache.load()
         if len(sents) == 0:
             return self.step_no_cache()
-        return sents, None
+        return sents, ""
 
     def step(self) -> str:
         output = self.load_output()
@@ -389,7 +370,7 @@ class Agent:
             print(f"CACHE MISS {self.name}")
             sents, text = self.step_no_cache()
             # also embeddings now in vector store
-            if text is not None:
+            if text != "":
                 self.save_output(text)
                 return text
             # otherwise, we need to rank the sentences
